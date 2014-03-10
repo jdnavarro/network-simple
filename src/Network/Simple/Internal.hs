@@ -40,4 +40,3 @@ instance IsString HostPreference where
 hpHostName:: HostPreference -> Maybe NS.HostName
 hpHostName (Host s) = Just s
 hpHostName _        = Nothing
-

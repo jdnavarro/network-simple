@@ -30,7 +30,8 @@ source-repository head
 
 library
   hs-source-dirs:    src
-  exposed-modules:   Network.Simple.SockAddr
+  exposed-modules:   Network.Simple
+                     Network.Simple.SockAddr
                      Network.Simple.TCP
   other-modules:     Network.Simple.Internal
   build-depends:     base         (>=4.5 && < 5)

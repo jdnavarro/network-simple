@@ -166,7 +166,7 @@ serve
                       -- connection socket and remote end address.
   -> m ()
 serve hp port k = do
-    addr <- resolve (hpHostName hp) (Just port)
+    addr <- resolve hp (Just port)
     NSA.serve addr k
 
 --------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ listen
                       -- the address it's bound to.
   -> m r
 listen hp port k = do
-    addr <- resolve (hpHostName hp) (Just port)
+    addr <- resolve hp (Just port)
     NSA.listen addr k
 
 --------------------------------------------------------------------------------
@@ -216,6 +216,18 @@ acceptFork lsock k = liftIO $ do
 
 --------------------------------------------------------------------------------
 
+-- | Obtain a 'NS.Socket' bound to the given host name and TCP service port.
+--
+-- The obtained 'NS.Socket' should be closed manually using 'closeSock' when
+-- it's not needed anymore.
+--
+-- Prefer to use 'listen' if you will be listening on this socket and using it
+-- within a limited scope, and would like it to be closed immediately after its
+-- usage or in case of exceptions.
+bindSock :: (MonadIO m, C.MonadCatch m)
+         => HostPreference -> NS.ServiceName -> m (NS.Socket, NS.SockAddr)
+bindSock hp port = resolve hp (Just port) >>= NSA.bindSock
+
 -- | Obtain a 'NS.Socket' connected to the given host and TCP service port.
 --
 -- The obtained 'NS.Socket' should be closed manually using 'closeSock' when
@@ -227,23 +239,15 @@ acceptFork lsock k = liftIO $ do
 -- of exceptions.
 connectSock :: (MonadIO m, C.MonadCatch m)
             => NS.HostName -> NS.ServiceName -> m (NS.Socket, NS.SockAddr)
-connectSock host port = do
-    addr <- resolve (Just host) (Just port)
-    liftIO $ E.bracketOnError (NSA.newSocket addr) closeSock $ \sock -> do
-        liftIO $ NS.connect sock addr
-        return (sock, addr)
-
--- | Obtain a 'NS.Socket' bound to the given host name and TCP service port.
---
--- The obtained 'NS.Socket' should be closed manually using 'closeSock' when
--- it's not needed anymore.
---
--- Prefer to use 'listen' if you will be listening on this socket and using it
--- within a limited scope, and would like it to be closed immediately after its
--- usage or in case of exceptions.
-bindSock :: (MonadIO m, C.MonadCatch m)
-         => HostPreference -> NS.ServiceName -> m (NS.Socket, NS.SockAddr)
-bindSock hp port = resolve (hpHostName hp) (Just port) >>= NSA.bindSock
+connectSock host port = liftIO $ do
+    (addr:_) <- NS.getAddrInfo (Just hints) (Just host) (Just port)
+    E.bracketOnError (newSocket addr) closeSock $ \sock -> do
+       let sockAddr = NS.addrAddress addr
+       NS.connect sock sockAddr
+       return (sock, sockAddr)
+  where
+    hints = NS.defaultHints { NS.addrFlags = [NS.AI_ADDRCONFIG]
+                            , NS.addrSocketType = NS.Stream }
 
 -- | Close the 'NS.Socket'.
 closeSock :: MonadIO m => NS.Socket -> m ()
@@ -310,34 +314,26 @@ silentCloseSock sock = liftIO $ do
     E.catch (closeSock sock)
             (\e -> let _ = e :: IOError in return ())
 
-resolve :: (MonadIO m, C.MonadCatch m) => Maybe NS.HostName -> Maybe NS.ServiceName -> m NS.SockAddr
-resolve = undefined
-    -- addrs <- NS.getAddrInfo (Just hints) (hpHostName hp) (Just port)
-    -- let addrs' = case hp of
-    --       HostIPv4 -> prioritize isIPv4addr addrs
-    --       HostIPv6 -> prioritize isIPv6addr addrs
-    --       _        -> addrs
-    -- tryAddrs addrs'
-  -- where
-    -- hints = NS.defaultHints { NS.addrFlags = [NS.AI_PASSIVE]
-    --                         , NS.addrSocketType = NS.Stream }
+resolve :: (MonadIO m, C.MonadCatch m) => HostPreference -> Maybe NS.ServiceName -> m NS.SockAddr
+resolve hp msn = liftIO $ do
+    addrs <- NS.getAddrInfo (Just hints) (hpHostName hp) msn
+    let addrs' = case hp of
+           HostIPv4 -> prioritize isIPv4addr addrs
+           HostIPv6 -> prioritize isIPv6addr addrs
+           _        -> addrs
+    tryAddrs addrs'
+  where
+    hints = NS.defaultHints { NS.addrFlags = [NS.AI_PASSIVE]
+                            , NS.addrSocketType = NS.Stream }
 
-    -- tryAddrs []     = error "bindSock: no addresses available"
-    -- tryAddrs [x]    = useAddr x
-    -- tryAddrs (x:xs) = E.catch (useAddr x)
-    --                           (\e -> let _ = e :: IOError in tryAddrs xs)
+    tryAddrs []     = error "bindSock: no addresses available"
+    tryAddrs [x]    = useAddr x
+    tryAddrs (x:xs) = E.catch (useAddr x)
+                              (\e -> let _ = e :: IOError in tryAddrs xs)
 
-    -- useAddr addr = E.bracketOnError (newSocket addr) closeSock $ \sock -> do
-    --   let sockAddr = NS.addrAddress addr
-    --   NS.setSocketOption sock NS.NoDelay 1
-    --   NS.setSocketOption sock NS.ReuseAddr 1
-    --   NS.bindSocket sock sockAddr
-    -- -liftIO $ do
-    -- (addr:_) <- NS.getAddrInfo (Just hints) (Just host) (Just port)
-    -- E.bracketOnError (newSocket addr) closeSock $ \sock -> do
-    --    let sockAddr = NS.addrAddress addr
-    --    NS.connect sock sockAddr
-    --    return (sock, sockAddr)
-  -- where
-    -- hints = NS.defaultHints { NS.addrFlags = [NS.AI_ADDRCONFIG]
-    --                         , NS.addrSocketType = NS.Stream }-   return (sock, sockAddr)
+    useAddr addr = E.bracketOnError (newSocket addr) closeSock $ \sock -> do
+      let sockAddr = NS.addrAddress addr
+      NS.setSocketOption sock NS.NoDelay 1
+      NS.setSocketOption sock NS.ReuseAddr 1
+      NS.bindSocket sock sockAddr
+      return sockAddr

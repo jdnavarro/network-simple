@@ -29,7 +29,7 @@ module Network.Simple.SockAddr
   ) where
 
 import Control.Monad (forever, when)
-import Control.Concurrent (ThreadId, forkIO, forkFinally)
+import Control.Concurrent (ThreadId, forkFinally)
 import qualified Control.Exception              as E
 import qualified Control.Monad.Catch            as C
 import Data.ByteString (ByteString)
@@ -44,7 +44,7 @@ import Network.Socket
   , defaultProtocol
   )
 import qualified Network.Socket.ByteString as NSB
-import Control.Monad.Catch (MonadCatch, bracket, bracketOnError, throwM)
+import Control.Monad.Catch (MonadCatch, bracket, bracketOnError)
 
 -- * Client side
 
